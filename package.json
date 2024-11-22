@@ -1,16 +1,20 @@
 {
-  "name": "adscript",
-  "version": "1.0.0",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
-  "dependencies": {
-    "ldapjs": "^3.0.7",
-    "sqlite3": "^5.1.7"
-  }
+    "name": "adscript",
+    "version": "1.0.0",
+    "main": "index.js",
+    "scripts": {
+        "start": "node src/server.js",
+        "test": "NODE_OPTIONS=--openssl-legacy-provider mocha tests/**/*.test.js"
+    },
+    "devDependencies": {
+        "mocha": "^10.8.2"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "ISC",
+    "description": "",
+    "dependencies": {
+        "ldapjs": "^3.0.7",
+        "sqlite3": "^5.1.7"
+    }
 }
