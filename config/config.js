@@ -1,7 +1,7 @@
 const config = {
     server: {
         host: process.env.AD_HOST || "localhost",
-        port: parseInt(process.env.AD_PORT) || 389,
+        port: parseInt(process.env.AD_PORT) || 3389,
         baseDN: process.env.AD_BASE_DN || "dc=mycompany,dc=com",
     },
     ldap: {
