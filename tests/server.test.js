@@ -36,6 +36,12 @@ describe("AD Server Tests", () => {
 
     describe("Authentication", () => {
         beforeEach(async () => {
+            // Clear existing users
+            await new Promise((resolve) => {
+                server.db.run("DELETE FROM users", [], resolve);
+            });
+
+            // Add test user
             await server.addUser({
                 sAMAccountName: "testuser",
                 userPrincipalName: "testuser@test.com",
@@ -45,7 +51,7 @@ describe("AD Server Tests", () => {
 
         it("should authenticate valid credentials", (done) => {
             client.bind("cn=testuser,dc=test,dc=com", "password123", (err) => {
-                assert(!err);
+                assert(!err, err?.message);
                 done();
             });
         });
@@ -65,6 +71,15 @@ describe("AD Server Tests", () => {
 
     describe("Group Management", () => {
         beforeEach(async () => {
+            // Clear existing data
+            await Promise.all([
+                new Promise((r) =>
+                    server.db.run("DELETE FROM group_memberships", [], r)
+                ),
+                new Promise((r) => server.db.run("DELETE FROM groups", [], r)),
+                new Promise((r) => server.db.run("DELETE FROM users", [], r)),
+            ]);
+
             groupService = server.groupService;
             await server.addGroup({
                 cn: "TestGroup",
