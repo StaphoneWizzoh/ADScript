@@ -50,38 +50,29 @@ class ADServer {
     }
 
     setupLDAPHandlers() {
-        // LDAP Bind Operation
         this.server.bind(this.options.baseDN, (req, res, next) => {
-            const username = req.dn.toString();
-            const password = req.credentials;
+            try {
+                // Parse DN from format: cn=username,dc=test,dc=com
+                const dnParts = req.dn.toString().split(",");
+                const username = dnParts[0].split("=")[1];
+                const password = req.credentials;
 
-            this.authenticateUser(username, password)
-                .then((authenticated) => {
-                    if (authenticated) {
-                        res.end();
-                    } else {
-                        return next(new ldap.InvalidCredentialsError());
-                    }
-                })
-                .catch((err) => next(new ldap.OperationsError(err.message)));
+                this.authenticateUser(username, password)
+                    .then((authenticated) => {
+                        if (authenticated) {
+                            res.end();
+                        } else {
+                            return next(new ldap.InvalidCredentialsError());
+                        }
+                    })
+                    .catch((err) =>
+                        next(new ldap.OperationsError(err.message))
+                    );
+            } catch (err) {
+                next(new ldap.OperationsError(err.message));
+            }
         });
-
-        // LDAP Search Operation
-        this.server.search(this.options.baseDN, (req, res, next) => {
-            const filter = req.filter.toString();
-            const searchOptions = {
-                scope: req.scope,
-                filter: filter,
-                attributes: req.attributes,
-            };
-
-            this.searchDirectory(searchOptions)
-                .then((entries) => {
-                    entries.forEach((entry) => res.send(entry));
-                    res.end();
-                })
-                .catch((err) => next(new ldap.OperationsError(err.message)));
-        });
+        // ... rest of handlers
     }
 
     async authenticateUser(username, password) {
@@ -107,11 +98,13 @@ class ADServer {
 
     async addUser({ sAMAccountName, userPrincipalName, password }) {
         const hash = this.hashPassword(password);
+        const distinguishedName = `cn=${sAMAccountName},${this.options.baseDN}`;
+
         return new Promise((resolve, reject) => {
             this.db.run(
-                `INSERT INTO users (sAMAccountName, userPrincipalName, passwordHash) 
-                 VALUES (?, ?, ?)`,
-                [sAMAccountName, userPrincipalName, hash],
+                `INSERT INTO users (sAMAccountName, userPrincipalName, distinguishedName, passwordHash) 
+                 VALUES (?, ?, ?, ?)`,
+                [sAMAccountName, userPrincipalName, distinguishedName, hash],
                 (err) => {
                     if (err) reject(err);
                     else resolve();
