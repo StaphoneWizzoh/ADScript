@@ -4,6 +4,14 @@ const crypto = require("crypto");
 const path = require("path");
 const config = require("../config/config");
 
+// Prod
+// const TLSManager = require("./security/tls");
+// const KerberosAuth = require("./auth/kerberos");
+// const GroupPolicy = require("./policy/gpo");
+// const ReplicationManager = require("./replication/sync");
+// const BackupManager = require("./backup/manager");
+// const logger = require("./logger");
+
 class ADServer {
     constructor(options = {}) {
         this.options = {
@@ -17,7 +25,16 @@ class ADServer {
         this.server = ldap.createServer();
         this.setupLDAPHandlers();
         this.groupService = new GroupService(this);
+        // this.setupAdvancedFeatures(options);
     }
+
+    // setupAdvancedFeatures(options) {
+    //     this.tls = new TLSManager(options.certPath, options.keyPath);
+    //     this.kerberos = new KerberosAuth(options.realm, options.kdc);
+    //     this.gpo = new GroupPolicy(this.db);
+    //     this.replication = new ReplicationManager(this, options.secondaries);
+    //     this.backup = new BackupManager(this.db, options.backupPath);
+    // }
 
     initDatabase() {
         const schema = `
