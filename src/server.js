@@ -2,19 +2,21 @@ const ldap = require("ldapjs");
 const sqlite3 = require("sqlite3");
 const crypto = require("crypto");
 const path = require("path");
+const config = require("../config/config");
 
 class ADServer {
     constructor(options = {}) {
         this.options = {
             host: options.host || "localhost",
-            port: options.port || 389,
+            port: options.port || 3389,
             baseDN: options.baseDN || "dc=domain,dc=com",
-            dbPath: options.dbPath || path.join(__dirname, "ad_data.sqlite"),
+            dbPath: options.dbPath || path.join(__dirname, "../ad_data.sqlite"),
         };
         this.db = new sqlite3.Database(this.options.dbPath);
         this.initDatabase();
         this.server = ldap.createServer();
         this.setupLDAPHandlers();
+        this.groupService = new GroupService(this);
     }
 
     initDatabase() {
@@ -99,11 +101,37 @@ class ADServer {
     }
 
     hashPassword(password) {
-        // Using NTLM-compatible hashing
-        return crypto
-            .createHash("md4")
-            .update(Buffer.from(password, "utf16le"))
-            .digest("hex");
+        // Use SHA-256
+        return crypto.createHash("sha256").update(password).digest("hex");
+    }
+
+    async addUser({ sAMAccountName, userPrincipalName, password }) {
+        const hash = this.hashPassword(password);
+        return new Promise((resolve, reject) => {
+            this.db.run(
+                `INSERT INTO users (sAMAccountName, userPrincipalName, passwordHash) 
+                 VALUES (?, ?, ?)`,
+                [sAMAccountName, userPrincipalName, hash],
+                (err) => {
+                    if (err) reject(err);
+                    else resolve();
+                }
+            );
+        });
+    }
+
+    async addGroup({ cn, description }) {
+        return new Promise((resolve, reject) => {
+            this.db.run(
+                `INSERT INTO groups (cn, description) 
+                 VALUES (?, ?)`,
+                [cn, description],
+                (err) => {
+                    if (err) reject(err);
+                    else resolve();
+                }
+            );
+        });
     }
 
     start() {
@@ -111,6 +139,17 @@ class ADServer {
             console.log(
                 `AD server listening at ${this.options.host}:${this.options.port}`
             );
+        });
+    }
+
+    stop() {
+        return new Promise((resolve, reject) => {
+            this.server.close(() => {
+                this.db.close((err) => {
+                    if (err) reject(err);
+                    else resolve();
+                });
+            });
         });
     }
 }
@@ -137,13 +176,36 @@ class GroupService {
             );
         });
     }
+
+    addUserToGroup(username, groupName) {
+        return new Promise((resolve, reject) => {
+            this.db.run(
+                `INSERT INTO group_memberships (userId, groupId)
+                 SELECT u.id, g.id
+                 FROM users u, groups g
+                 WHERE (u.sAMAccountName = ? OR u.userPrincipalName = ?)
+                 AND g.cn = ?`,
+                [username, username, groupName],
+                (err) => {
+                    if (err) reject(err);
+                    else resolve();
+                }
+            );
+        });
+    }
 }
 
-// Usage
-const server = new ADServer({
-    host: "localhost",
-    port: 389,
-    baseDN: "dc=mycompany,dc=com",
-});
+module.exports = {
+    ADServer,
+    GroupService,
+};
 
-server.start;
+if (require.main === module) {
+    const server = new ADServer({
+        host: config.server.host,
+        port: config.server.port,
+        baseDN: config.server.baseDN,
+    });
+
+    server.start();
+}
