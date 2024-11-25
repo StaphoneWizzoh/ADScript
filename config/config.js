@@ -8,6 +8,14 @@ const config = {
         timeout: parseInt(process.env.LDAP_TIMEOUT) || 30000,
         maxPageSize: parseInt(process.env.LDAP_MAX_PAGE_SIZE) || 1000,
     },
+    auth: {
+        defaultMethod: "basic",
+        kerberos: {
+            enabled: false,
+            realm: process.env.KRB5_REALM || "DOMAIN.COM",
+            kdc: process.env.KRB5_KDC || "kdc.domain.com",
+        },
+    },
 };
 
 module.exports = config;
