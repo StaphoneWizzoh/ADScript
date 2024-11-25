@@ -4,9 +4,9 @@ const crypto = require("crypto");
 const path = require("path");
 const config = require("../config/config");
 
-// Prod
+// Production env
 // const TLSManager = require("./security/tls");
-// const KerberosAuth = require("./auth/kerberos");
+const AuthProvider = require("./auth/authProvider");
 // const GroupPolicy = require("./policy/gpo");
 // const ReplicationManager = require("./replication/sync");
 // const BackupManager = require("./backup/manager");
@@ -25,6 +25,9 @@ class ADServer {
         this.server = ldap.createServer();
         this.setupLDAPHandlers();
         this.groupService = new GroupService(this);
+        this.authProvider = new AuthProvider({
+            kerberos: options.auth?.kerberos,
+        });
         // this.setupAdvancedFeatures(options);
     }
 
@@ -69,17 +72,23 @@ class ADServer {
     setupLDAPHandlers() {
         this.server.bind(this.options.baseDN, (req, res, next) => {
             try {
-                // Parse DN from format: cn=username,dc=test,dc=com
                 const dnParts = req.dn.toString().split(",");
                 const username = dnParts[0].split("=")[1];
                 const password = req.credentials;
 
-                this.authenticateUser(username, password)
+                // Get auth method from request or config
+                const authMethod =
+                    req.authMethod ||
+                    this.options.auth?.defaultMethod ||
+                    "basic";
+
+                this.authProvider
+                    .authenticate(username, password, authMethod)
                     .then((authenticated) => {
                         if (authenticated) {
                             res.end();
                         } else {
-                            return next(new ldap.InvalidCredentialsError());
+                            next(new ldap.InvalidCredentialsError());
                         }
                     })
                     .catch((err) =>
@@ -215,6 +224,7 @@ if (require.main === module) {
         host: config.server.host,
         port: config.server.port,
         baseDN: config.server.baseDN,
+        auth: config.auth,
     });
 
     server.start();
