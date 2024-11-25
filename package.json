@@ -14,8 +14,9 @@
     "license": "ISC",
     "description": "",
     "dependencies": {
-        "winston": "^3.11.0",
+        "kerberos": "^2.2.0",
+        "ldapjs": "^3.0.7",
         "sqlite3": "^5.1.7",
-        "ldapjs": "^3.0.7"
+        "winston": "^3.11.0"
     }
 }
