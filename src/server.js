@@ -156,7 +156,7 @@ class ADServer {
     start() {
         this.server.listen(this.options.port, this.options.host, () => {
             console.log(
-                `AD server listening at ${this.options.host}:${this.options.port}`
+                `AD server listening at http://${this.options.host}:${this.options.port}`
             );
         });
     }
