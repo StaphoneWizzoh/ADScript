@@ -14,20 +14,29 @@ class KerberosAuth {
         this.kdc = kdc;
         this.tickets = new Map();
         this.sessionKeys = new Map();
+        this.delegationCache = new Map();
+        this.preAuthKeys = new Map();
     }
 
-    async authenticate(username, password) {
+    async authenticate(username, password, options = {}) {
         try {
-            // Step 1: AS Exchange - Client requests TGT
-            const tgt = await this._requestTGT(username, password);
+            // Step 1: Pre-authentication
+            const preAuthData = await this._performPreAuth(username, password);
 
-            // Step 2: TGS Exchange - Use TGT to get service ticket
+            // Step 2: AS Exchange with pre-auth data
+            const tgt = await this._requestTGT(username, password, preAuthData);
+
+            // Step 3: TGS Exchange
             const serviceTicket = await this._requestServiceTicket(
                 username,
-                tgt
+                tgt,
+                {
+                    delegation: options.allowDelegation,
+                    forwardable: options.allowForwarding,
+                }
             );
 
-            // Step 3: Client/Server Authentication
+            // Step 4: Client/Server Authentication
             return await this._validateServiceTicket(username, serviceTicket);
         } catch (err) {
             console.error("Kerberos authentication failed:", err);
@@ -35,35 +44,68 @@ class KerberosAuth {
         }
     }
 
-    async _requestTGT(username, password) {
-        // Create Authentication Service Request (AS-REQ)
+    async _performPreAuth(username, password) {
+        // Generate pre-auth timestamp
+        const timestamp = new Date();
+
+        // Create pre-auth encryption key
+        const preAuthKey = crypto
+            .createHash("sha256")
+            .update(password)
+            .update(timestamp.toISOString())
+            .digest();
+
+        // Store for validation
+        this.preAuthKeys.set(username, {
+            key: preAuthKey,
+            timestamp,
+            expires: new Date(timestamp.getTime() + 2 * 60 * 1000), // 2 min validity
+        });
+
+        return {
+            timestamp,
+            encryptedTimestamp: this._encrypt(
+                timestamp.toISOString(),
+                preAuthKey
+            ),
+        };
+    }
+
+    async _requestTGT(username, password, preAuthData) {
+        // Validate pre-auth data
+        const storedPreAuth = this.preAuthKeys.get(username);
+        if (!storedPreAuth || storedPreAuth.expires < new Date()) {
+            throw new KerberosError(
+                "Pre-authentication failed or expired",
+                "KRB_AP_ERR_PREAUTH_FAILED"
+            );
+        }
+
+        // Create AS-REQ with pre-auth data
         const asReq = {
             username,
             realm: this.realm,
             timestamp: new Date(),
             nonce: crypto.randomBytes(32).toString("hex"),
+            preAuth: preAuthData,
         };
 
-        // Hash password using NT hash (same as Windows)
-        const passwordHash = crypto
-            .createHash("md4")
-            .update(Buffer.from(password, "utf16le"))
-            .digest();
-
-        // Generate session key
+        // Generate session key and create TGT
         const sessionKey = crypto.randomBytes(32);
         this.sessionKeys.set(username, sessionKey);
 
-        // Create TGT encrypted with KDC key (simulated)
         const tgt = {
             clientName: username,
             realm: this.realm,
             timestamp: asReq.timestamp,
-            validity: 36000, // 10 hours
-            sessionKey: sessionKey,
+            validity: 36000,
+            sessionKey,
+            flags: {
+                forwardable: true,
+                proxiable: true,
+            },
         };
 
-        // Store TGT
         this.tickets.set(username, {
             ticket: tgt,
             expires: new Date(Date.now() + tgt.validity * 1000),
@@ -72,50 +114,93 @@ class KerberosAuth {
         return tgt;
     }
 
-    async _requestServiceTicket(username, tgt) {
-        // Verify TGT is still valid
-        const storedTicket = this.tickets.get(username);
-        if (!storedTicket || storedTicket.expires < new Date()) {
+    async protocolTransition(sourceUser, targetUser, targetService) {
+        // Verify source user has delegation rights
+        if (!this._canDelegate(sourceUser)) {
             throw new KerberosError(
-                "TGT expired or invalid",
-                "KRB_AP_ERR_TKT_EXPIRED"
+                "Protocol transition not allowed",
+                "KRB_AP_ERR_DELEGATE_NOALLOWED"
             );
         }
 
-        // Create service ticket using session key
-        const serviceTicket = {
-            clientName: username,
-            realm: this.realm,
+        // Create S4U2Self request
+        const s4u2self = {
+            impersonator: sourceUser,
+            target: targetUser,
             timestamp: new Date(),
-            validity: 3600, // 1 hour
-            sessionKey: this.sessionKeys.get(username),
         };
 
-        return serviceTicket;
+        // Generate transition ticket
+        const transitionTicket = {
+            clientName: targetUser,
+            realm: this.realm,
+            timestamp: s4u2self.timestamp,
+            validity: 3600,
+            serviceTarget: targetService,
+            impersonator: sourceUser,
+        };
+
+        return transitionTicket;
     }
 
-    async _validateServiceTicket(username, serviceTicket) {
-        // Verify ticket details
-        if (
-            serviceTicket.clientName !== username ||
-            serviceTicket.realm !== this.realm ||
-            serviceTicket.timestamp > new Date() ||
-            !this.sessionKeys.get(username).equals(serviceTicket.sessionKey)
-        ) {
-            return false;
+    async delegateCredentials(username, targetService, delegatedTicket) {
+        // Verify ticket is delegatable
+        if (!delegatedTicket.flags?.delegatable) {
+            throw new KerberosError(
+                "Ticket not delegatable",
+                "KRB_AP_ERR_DELEGATE_NOALLOWED"
+            );
         }
+
+        // Store delegation info
+        this.delegationCache.set(`${username}:${targetService}`, {
+            ticket: delegatedTicket,
+            expires: new Date(Date.now() + delegatedTicket.validity * 1000),
+        });
 
         return true;
     }
 
-    // Cleanup expired tickets periodically
-    _cleanupTickets() {
+    _canDelegate(username) {
+        // Check if user has delegation rights (simplified)
+        return username.endsWith("$") || username.startsWith("service_");
+    }
+
+    _encrypt(data, key) {
+        const cipher = crypto.createCipheriv(
+            "aes-256-cbc",
+            key,
+            crypto.randomBytes(16)
+        );
+        return Buffer.concat([cipher.update(data), cipher.final()]);
+    }
+
+    _decrypt(data, key) {
+        const decipher = crypto.createDecipheriv(
+            "aes-256-cbc",
+            key,
+            data.slice(0, 16)
+        );
+        return Buffer.concat([
+            decipher.update(data.slice(16)),
+            decipher.final(),
+        ]);
+    }
+
+    // Regular cleanup
+    _cleanup() {
         const now = new Date();
-        for (const [username, ticket] of this.tickets.entries()) {
-            if (ticket.expires < now) {
-                this.tickets.delete(username);
-                this.sessionKeys.delete(username);
-            }
+
+        for (const [key, data] of this.tickets.entries()) {
+            if (data.expires < now) this.tickets.delete(key);
+        }
+
+        for (const [key, data] of this.preAuthKeys.entries()) {
+            if (data.expires < now) this.preAuthKeys.delete(key);
+        }
+
+        for (const [key, data] of this.delegationCache.entries()) {
+            if (data.expires < now) this.delegationCache.delete(key);
         }
     }
 }
