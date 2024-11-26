@@ -11,7 +11,7 @@ const config = {
     auth: {
         defaultMethod: "basic",
         kerberos: {
-            enabled: false,
+            enabled: true,
             realm: process.env.KRB5_REALM || "DOMAIN.COM",
             kdc: process.env.KRB5_KDC || "kdc.domain.com",
         },
