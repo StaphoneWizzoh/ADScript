@@ -1,4 +1,5 @@
 const crypto = require("crypto");
+const KerberosAuth = require("./kerberos");
 
 class AuthProvider {
     constructor(options = {}, db) {
@@ -12,7 +13,6 @@ class AuthProvider {
 
         if (options.kerberos?.enabled) {
             try {
-                const KerberosAuth = require("./kerberos");
                 const kerberosAuth = new KerberosAuth(
                     options.kerberos.realm,
                     options.kerberos.kdc
